@@ -277,7 +277,7 @@
   <section>
     <div class="shd"><span class="n">03</span><h2>視覺化分析</h2><span class="en">Visual Analytics</span></div>
     <div class="grid2">
-      <div class="card"><h3>投資報酬 vs 移工人數</h3><div class="ch">需求驅動的部署爬坡：達滿載門檻前，報酬隨規模上升（NT$ 萬）</div><div class="cbox"><canvas id="cWorkers" role="img" aria-label="年化淨收益隨移工人數上升至滿載後持平的曲線"></canvas></div></div>
+      <div class="card"><h3>放款資金需求 vs 移工人數</h3><div class="ch">服務 N 名移工所需的分期放款總額，對照當前資金池（NT$ 萬／億）</div><div class="cbox"><canvas id="cWorkers" role="img" aria-label="所需放款資金隨移工人數上升、遠超當前資金池的曲線"></canvas></div></div>
       <div class="card"><h3>投資人逐年現金流</h3><div class="ch">年化淨收益＋第 N 年退出返還本金（NT$ 萬）</div><div class="cbox"><canvas id="cCash" role="img" aria-label="逐年現金流長條圖"></canvas></div></div>
     </div>
     <div class="grid2" style="margin-top:16px">
@@ -360,7 +360,7 @@
 
 <script>
 /* ===== 由下而上聯動引擎 ===== */
-const DEFAULTS={total:3000,sys:600,ops:200,years:5,workers:30000,adoption:32,avgBalance:15000,feePct:6.0,tenorM:3,badDebtPct:8.0,opexPct:0,netYieldPct:16,mode:'advanced',scenario:'aggressive'};
+const DEFAULTS={total:3000,sys:600,ops:200,years:5,workers:100000,adoption:32,avgBalance:15000,feePct:6.0,tenorM:3,badDebtPct:8.0,opexPct:0,netYieldPct:16,mode:'advanced',scenario:'aggressive'};
 const PRESETS={
   conservative:{adoption:20,feePct:5.0,badDebtPct:8.0,netYieldPct:12},
   normal:      {adoption:25,feePct:5.5,badDebtPct:8.0,netYieldPct:14},
@@ -382,9 +382,9 @@ const F={
   sys:{lbl:'系統建置成本',cat:'資本支出 · CapEx',unit:'萬',min:0,max:1500,step:50},
   ops:{lbl:'營運啟動成本',cat:'資本支出 · CapEx',unit:'萬',min:0,max:1000,step:50},
   years:{lbl:'投資年限',cat:'期限 · Tenor',unit:'年',min:1,max:10,step:1},
-  workers:{lbl:'移工人數',cat:'市場規模 · Users',unit:'人',min:100,max:100000,step:100,log:true,help:'採用分期服務的潛在移工總人口；對數刻度。'},
+  workers:{lbl:'移工人數',cat:'市場規模 · Users',unit:'人',min:30000,max:600000,step:1000,log:true,help:'採用分期服務的潛在移工總人口（3萬–60萬）；對數刻度。'},
   adoption:{lbl:'分期採用率',cat:'滲透 · Adoption',unit:'%',min:5,max:60,step:1,linked:true,help:'移工人口中實際使用分期服務的比例。'},
-  avgBalance:{lbl:'人均在貸餘額',cat:'客單 · Balance',unit:'元',min:5000,max:60000,step:1000,help:'每位活躍用戶平均在貸的分期金額。'},
+  avgBalance:{lbl:'人均在貸餘額',cat:'客單 · Balance',unit:'元',min:5000,max:40000,step:1000,help:'每位活躍用戶平均在貸的分期金額（5千–4萬）。'},
   feePct:{lbl:'平均手續費率',cat:'利差 · Fee/期',unit:'%',min:2,max:12,step:0.25,linked:true,help:'每筆分期方案收取的手續費（佔分期金額%）。'},
   tenorM:{lbl:'平均分期天期',cat:'周轉 · Tenor',unit:'月',min:3,max:36,step:1,help:'平均分期月數；周轉次數 = 12 ÷ 天期。'},
   badDebtPct:{lbl:'年化壞帳率',cat:'風險 · Loss',unit:'%',min:0,max:20,step:0.5,linked:true,help:'資金池每年因違約／呆帳產生的損失率。'},
@@ -456,7 +456,8 @@ function renderKPIs(m){
     {cls:'grn',l:state.years+' 年總回收',v:wan(m.totalRecovery),s:'本金 '+fmt(state.total)+'萬 ＋ 累積收益'},
     {cls:'gold',l:'投資報酬率 ROI',v:pct(m.roi*100),s:'累積收益 ÷ 總投資額',pill:'五年'},
     {cls:'blu',l:'真實年化報酬 IRR',v:pct(m.irrVal*100),s:'投資人全額本金內部報酬率'},
-    {cls:'pur',l:'資金需求（移工驅動）',v:wanBig(m.demand),s:fmt(Math.round(m.activeUsers))+' 活躍用戶 × '+fmt(state.avgBalance)+'元'},
+    {cls:'pur',l:'所需放款資金（移工驅動）',v:wanBig(m.demand),s:fmt(Math.round(m.activeUsers))+' 活躍用戶 × '+fmt(state.avgBalance)+'元'},
+    {cls:'pur',l:'未滿足需求（放款缺口）',v:wanBig(Math.max(0,m.demand-m.deployed)),s:'需求 − 已部署；反映擴張可追加之資金空間'},
     {cls:'',l:'BNPL 資金池',v:wan(m.pool),s:'總投資 − 一次性 '+fmt(m.oneTime)+'萬'},
     {cls:'blu',l:'回本時點 Payback',v:(m.payback?m.payback+' 年':'＞'+state.years+'年'),s:'累積回收 ≥ 投入本金'}
   ];
@@ -469,10 +470,13 @@ if(typeof Chart!=='undefined'){Chart.defaults.font.family="'Inter','Noto Sans TC
 function baseOpts(extra){return Object.assign({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:12,boxHeight:12,font:{size:11},padding:14}}},scales:{x:{grid:{color:GRID},ticks:{font:{size:11}}},y:{grid:{color:GRID},ticks:{font:{size:11}}}}},extra||{});}
 
 function renderCharts(m){
-  const pts=[100,250,500,800,1200,1800,2600,3600,4583,6000,9000,15000,30000,60000,100000];
-  const wl=[],wInc=[];pts.forEach(w=>{const r=compute(Object.assign({},state,{workers:w}));wl.push(w>=10000?(w/10000)+'萬':fmt(w));wInc.push(Math.round(r.annualIncome));});
-  if(!charts.workers){charts.workers=new Chart(document.getElementById('cWorkers'),{type:'line',data:{labels:wl,datasets:[{label:'年化淨收益 (萬)',data:wInc,borderColor:'#13a394',backgroundColor:'rgba(45,212,191,.12)',fill:true,tension:.3,borderWidth:2.5,pointRadius:2}]},options:baseOpts({plugins:{legend:{display:false},tooltip:{callbacks:{title:c=>c[0].label+' 人',label:c=>' 年收益 '+fmt(c.raw)+' 萬'}}},scales:{x:{grid:{color:GRID},title:{display:true,text:'移工人數（對數刻度）',font:{size:10}}},y:{grid:{color:GRID},title:{display:true,text:'年化淨收益 (萬)',font:{size:10}}}}})});}
-  else{charts.workers.data.labels=wl;charts.workers.data.datasets[0].data=wInc;charts.workers.update();}
+  const pts=[30000,50000,75000,100000,150000,200000,300000,450000,600000];
+  const wl=[],wDem=[],wPool=[];pts.forEach(w=>{const r=compute(Object.assign({},state,{workers:w}));wl.push((w/10000)+'萬');wDem.push(Math.round(r.demand));wPool.push(Math.round(r.pool));});
+  if(!charts.workers){charts.workers=new Chart(document.getElementById('cWorkers'),{type:'line',data:{labels:wl,datasets:[
+      {label:'所需放款資金',data:wDem,borderColor:'#13a394',backgroundColor:'rgba(19,163,148,.12)',fill:true,tension:.3,borderWidth:2.5,pointRadius:2},
+      {label:'當前資金池',data:wPool,borderColor:'#d33f52',borderDash:[6,5],borderWidth:1.5,pointRadius:0,fill:false}
+    ]},options:baseOpts({plugins:{legend:{labels:{boxWidth:12,padding:12}},tooltip:{callbacks:{title:c=>c[0].label+' 人',label:c=>' '+c.dataset.label+' '+wanBig(c.raw)}}},scales:{x:{grid:{color:GRID},title:{display:true,text:'移工人數（對數刻度）',font:{size:10}}},y:{grid:{color:GRID},title:{display:true,text:'放款資金需求',font:{size:10}},ticks:{callback:v=>v>=10000?(v/10000)+'億':fmt(v)}}}})});}
+  else{charts.workers.data.labels=wl;charts.workers.data.datasets[0].data=wDem;charts.workers.data.datasets[1].data=wPool;charts.workers.update();}
 
   const yrs=[],cfBars=[],cols=[];for(let y=0;y<=state.years;y++){const v=y===0?-state.total:(y<state.years?m.annualIncome:m.annualIncome+state.total);yrs.push('第'+y+'年');cfBars.push(Math.round(v));cols.push(y===0?'#f4717a':(y===state.years?'#cf9a1c':'#13a394'));}
   if(!charts.cash){charts.cash=new Chart(document.getElementById('cCash'),{type:'bar',data:{labels:yrs,datasets:[{label:'淨現金流',data:cfBars,backgroundColor:cols,borderRadius:5}]},options:baseOpts({plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>(c.raw>=0?'+':'−')+fmt(Math.abs(c.raw))+' 萬'}}}})});}
@@ -534,7 +538,7 @@ function renderComment(m){
   if(m.pool<=0){p2='<span class="warn">結構警示：</span>一次性成本（'+fmt(m.oneTime)+' 萬）已達或超過總投資（'+fmt(state.total)+' 萬），BNPL 資金池為 0，無資金可部署生息。請提高總投資或降低建置／啟動成本。';}
   else if(state.mode==='advanced'&&m.netRateDeployed<0){p2='<span class="warn">模型失效：</span>當前毛收益率 '+(m.grossRate*100).toFixed(1)+'% 不足以覆蓋壞帳 '+state.badDebtPct+'%＋營運 '+state.opexPct+'%，淨收益為負（'+ny.toFixed(1)+'%），此參數組合下方案無法成立。';}
   else if(state.mode==='advanced'&&!constrained){p2='<span class="warn">規模警示：</span>當前需求僅 '+wan(m.demand)+'，低於資金池 '+fmt(m.pool)+' 萬，<b>部署率僅 '+dep.toFixed(0)+'%</b>。閒置資金不生息，年收益被壓到 <b>'+fmt(Math.round(m.annualIncome))+' 萬</b>、IRR 僅 <span class="warn">'+irrV.toFixed(1)+'%</span>。要讓資金池滿載，移工人數需達約 <b>'+fmt(Math.round(m.breakevenWorkers))+' 人</b>（其餘條件不變）——這正是「規模即報酬」的關鍵。';}
-  else{p2='資金池滿載部署（部署率 '+dep.toFixed(0)+'%）。在淨收益率 <b>'+ny.toFixed(1)+'%</b> 下，年產出 <b>'+fmt(Math.round(m.annualIncome))+' 萬</b>，'+state.years+' 年累積 <b>'+fmt(Math.round(m.cumIncome))+' 萬</b>，五年總回收 <b>'+fmt(Math.round(m.totalRecovery))+' 萬</b>。';}
+  else{p2='資金池滿載部署（部署率 '+dep.toFixed(0)+'%）。在淨收益率 <b>'+ny.toFixed(1)+'%</b> 下，年產出 <b>'+fmt(Math.round(m.annualIncome))+' 萬</b>，五年總回收 <b>'+fmt(Math.round(m.totalRecovery))+' 萬</b>。<span class="warn">規模洞察：</span>'+fmt(state.workers)+' 名移工帶來 <b>'+wanBig(m.demand)+'</b> 放款需求，遠超資金池 '+fmt(m.pool)+' 萬，未滿足缺口 <span class="hl">'+wanBig(Math.max(0,m.demand-m.deployed))+'</span>——投資報酬已由資金池收益率鎖定（與人數無關）；人數規模反映的是後續擴張可吸納的放款空間與追加募資潛力。';}
   let p3='<span class="warn">機構視角：</span>headline <b>'+ny.toFixed(1)+'%</b> 為資金池收益率；以投資人全額 '+fmt(state.total)+' 萬計之真實年化 IRR 約 <span class="hl">'+irrV.toFixed(1)+'%</span>，五年 ROI <b>'+roi.toFixed(1)+'%</b>，回本第 <b>'+(m.payback||'＞'+state.years)+'</b> 年。對標定存／投資級債券時應以 IRR 為準。';
   let p4='<span class="warn">敏感度：</span>壞帳率每升 <b>1 個百分點</b>，年收益約減 <b>'+fmt(Math.round(bdSens))+' 萬</b>。'+(ny>=15?'激進情境壞帳緩衝較薄，建議要求風險準備金、超額擔保或分潤回撥對沖下行。':(ny<11?'收益偏低，宜檢視手續費定價、周轉與部署率是否仍有提升空間。':'風險報酬尚屬均衡，建議於合約鎖定最低保證收益並明列本金返還來源。'));
   document.getElementById('commentBody').innerHTML='<p>'+p1+'</p><p>'+p2+'</p><p>'+p3+'</p><p>'+p4+'</p>';
@@ -543,7 +547,7 @@ function renderComment(m){
 function renderChain(m){
   const nodes=[
     {ic:'01',t:'移工人數',v:fmt(state.workers)+' 人'},
-    {ic:'02',t:'資金需求',v:wanBig(m.demand)},
+    {ic:'02',t:'放款資金需求',v:wanBig(m.demand)},
     {ic:'03',t:'資金部署率',v:pct(m.deployRate*100,0)},
     {ic:'04',t:'淨收益率',v:pct(m.netYieldOnPool*100)},
     {ic:'05',t:'投資報酬率',v:pct(m.roi*100),out:true}
@@ -561,7 +565,7 @@ function render(){
     el.textContent=(f.step<1)?v.toFixed(f.step<0.5?2:1):fmt(v);
     const inp=document.getElementById('r_'+k);if(inp&&k!==dragging){const sv=toSlider(k,v);if(Math.abs(parseFloat(inp.value)-sv)>0.5)inp.value=sv;}
     const d=document.getElementById('d_'+k);
-    if(d){let txt='';if(k==='tenorM')txt='→ 周轉 '+(12/v).toFixed(1)+' 次/年';else if(k==='feePct'&&state.mode==='advanced')txt='→ 毛收益率 '+(12/state.tenorM*v).toFixed(1)+'%';else if(k==='workers'){txt=(m.pool>0&&m.demand>=m.pool)?'→ 資金池滿載 ✓':'→ 部署率 '+(m.deployRate*100).toFixed(0)+'%';}d.textContent=txt;}
+    if(d){let txt='';if(k==='tenorM')txt='→ 周轉 '+(12/v).toFixed(1)+' 次/年';else if(k==='feePct'&&state.mode==='advanced')txt='→ 毛收益率 '+(12/state.tenorM*v).toFixed(1)+'%';else if(k==='workers'){txt='→ 放款需求 '+wanBig(m.demand)+(m.demand>=m.pool?'（滿載）':'');}d.textContent=txt;}
   }));
   document.querySelectorAll('.sctab').forEach(b=>{const on=b.dataset.sc===state.scenario;b.classList.toggle('on',on);b.setAttribute('aria-selected',on?'true':'false');});
   const sp=document.getElementById('statePill');
