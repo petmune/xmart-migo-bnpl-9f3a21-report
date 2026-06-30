@@ -369,7 +369,7 @@
 
 <script>
 /* ===== 由下而上聯動引擎 ===== */
-const DEFAULTS={total:3000,sys:600,ops:200,years:5,workers:100000,adoption:32,avgBalance:15000,feePct:6.0,tenorM:3,badDebtPct:8.0,opexPct:0,compShare:12,netYieldPct:16,mode:'advanced',scenario:'aggressive'};
+const DEFAULTS={total:3000,sys:600,ops:200,years:5,workers:100000,adoption:32,avgBalance:15000,feePct:6.0,tenorM:3,badDebtPct:8.0,opexPct:0,compShare:12,negBonus:0,netYieldPct:16,mode:'advanced',scenario:'aggressive'};
 const PRESETS={
   conservative:{adoption:20,feePct:5.0,badDebtPct:8.0,netYieldPct:12},
   normal:      {adoption:25,feePct:5.5,badDebtPct:8.0,netYieldPct:14},
@@ -385,7 +385,7 @@ const GROUPS=[
   {id:'dem',cls:'dem',t:'市場與需求',e:'Market & Demand',gi:'◎',keys:['workers','adoption','avgBalance']},
   {id:'yld',cls:'yld',t:'收益引擎',e:'Yield Engine',gi:'%',keys:['feePct','tenorM','badDebtPct','opexPct'],adv:true},
   {id:'yld2',cls:'yld',t:'收益設定',e:'Net Yield',gi:'%',keys:['netYieldPct'],simple:true},
-  {id:'split',cls:'split',t:'分潤結構',e:'Profit Split',gi:'÷',keys:['compShare']}
+  {id:'split',cls:'split',t:'分潤結構',e:'Profit Split',gi:'÷',keys:['compShare','negBonus']}
 ];
 const F={
   total:{lbl:'總投資額',cat:'財務 · Capital',unit:'萬',min:1000,max:6000,step:100},
@@ -399,7 +399,8 @@ const F={
   tenorM:{lbl:'平均分期天期',cat:'周轉 · Tenor',unit:'月',min:3,max:36,step:1,help:'平均分期月數；周轉次數 = 12 ÷ 天期。'},
   badDebtPct:{lbl:'年化壞帳率',cat:'風險 · Loss',unit:'%',min:0,max:20,step:0.5,linked:true,help:'資金池每年因違約／呆帳產生的損失率。'},
   opexPct:{lbl:'年營運成本率',cat:'成本 · OpEx',unit:'%',min:0,max:6,step:0.25,help:'催收／客服／法遵／風控等持續營運成本（佔資金池%）。'},
-  compShare:{lbl:'公司分潤比例',cat:'分潤 · Company Carry',unit:'%',min:0,max:80,step:1,linked:false,help:'資金池淨利中由公司（XMART／MIGO）分得的比例；其餘歸投資人。'},
+  compShare:{lbl:'公司分潤比例（基礎）',cat:'分潤 · Company Carry',unit:'%',min:0,max:80,step:1,linked:false,help:'資金池淨利中公司（XMART／MIGO）的基礎分潤比例；其餘歸投資人。'},
+  negBonus:{lbl:'投資人協商加碼',cat:'分潤 · Negotiated',unit:'%',min:0,max:20,step:1,linked:false,help:'投資人談判成功時額外爭取到的分潤點數，由公司讓出。公司實得分潤 = 基礎分潤 − 此值。'},
   netYieldPct:{lbl:'淨收益率',cat:'收益 · Net Yield',unit:'%',min:4,max:24,step:0.5,linked:true,help:'直接設定資金池年化淨收益率（簡易模式）。'}
 };
 
@@ -422,7 +423,8 @@ function compute(s){
   const turnover=12/s.tenorM, grossRate=turnover*(s.feePct/100);
   let netRateDeployed = s.mode==='simple' ? s.netYieldPct/100 : (grossRate - s.badDebtPct/100 - s.opexPct/100);
   const netProfit=deployed*netRateDeployed;
-  const companyShare=netProfit*((s.compShare||0)/100);
+  const effCompShare=(s.compShare||0)-(s.negBonus||0);
+  const companyShare=netProfit*(effCompShare/100);
   const annualIncome=netProfit-companyShare;
   const netYieldOnPool=pool>0?netProfit/pool:0, investorYieldOnPool=pool>0?annualIncome/pool:0, netYieldOnTotal=s.total>0?annualIncome/s.total:0;
   const cumIncome=annualIncome*s.years, totalRecovery=s.total+cumIncome, roi=s.total>0?cumIncome/s.total:0;
@@ -430,7 +432,7 @@ function compute(s){
   const irrVal=irr(cf);
   let cum=0,payback=null;for(let y=1;y<=s.years;y++){cum+=(y<s.years?annualIncome:annualIncome+s.total);if(cum>=s.total&&payback===null)payback=y;}
   const breakevenWorkers=(pool>0&&s.adoption>0&&s.avgBalance>0)?poolNT/((s.adoption/100)*s.avgBalance):Infinity;
-  return {oneTime,pool,activeUsers,demand,deployRate,deployed,turnover,grossRate,netRateDeployed,netProfit,companyShare,annualIncome,netYieldOnPool,investorYieldOnPool,netYieldOnTotal,cumIncome,totalRecovery,roi,irrVal,payback,breakevenWorkers};
+  return {oneTime,pool,activeUsers,demand,deployRate,deployed,turnover,grossRate,netRateDeployed,netProfit,companyShare,effCompShare,annualIncome,netYieldOnPool,investorYieldOnPool,netYieldOnTotal,cumIncome,totalRecovery,roi,irrVal,payback,breakevenWorkers};
 }
 
 function buildControls(){
@@ -463,11 +465,11 @@ function renderKPIs(m){
   const wrap=document.getElementById('kpis');
   const deployPct=m.deployRate*100, constrained=m.pool>0&&m.demand>=m.pool, poolZero=m.pool<=0, negYield=state.mode==='advanced'&&m.netRateDeployed<=0;
   const cards=[
-    {cls:'hero gold',l:'投資人淨報酬率（分潤後）',v:(poolZero?'—':pct(m.investorYieldOnPool*100))+((negYield&&!poolZero)?' <span class="pill warn">淨收益為負</span>':''),s:poolZero?'資金池為 0：總投資不足以涵蓋一次性成本':(negYield?'毛收益不足以覆蓋壞帳與營運成本，方案不成立':'資金池淨利率 '+pct(m.netYieldOnPool*100)+' × 投資人 '+(100-state.compShare)+'%（公司分潤 '+state.compShare+'%）')},
+    {cls:'hero gold',l:'投資人淨報酬率（分潤後）',v:(poolZero?'—':pct(m.investorYieldOnPool*100))+((negYield&&!poolZero)?' <span class="pill warn">淨收益為負</span>':''),s:poolZero?'資金池為 0：總投資不足以涵蓋一次性成本':(negYield?'毛收益不足以覆蓋壞帳與營運成本，方案不成立':'資金池淨利率 '+pct(m.netYieldOnPool*100)+' × 投資人 '+(100-m.effCompShare)+'%（公司實得 '+m.effCompShare+'%'+(state.negBonus>0?'，含協商加碼 '+state.negBonus+'%':'')+'）')},
     {cls:'blu',l:'資金部署率',v:pct(deployPct,0),gauge:Math.min(100,deployPct),s:poolZero?'資金池為 0，無法部署':(constrained?'需求 ≥ 資金池，資金滿載運用':'僅部署 '+wan(m.deployed)+'，受移工規模限制')},
     {cls:'',l:'資金池年淨利（分潤前）',v:wan(m.netProfit),s:'毛收益 − 壞帳 − 營運；淨利率 '+pct(m.netYieldOnPool*100)},
-    {cls:'coral',l:'公司分潤（'+state.compShare+'%）',v:wan(m.companyShare),s:'資金池淨利 × 公司分潤比例'},
-    {cls:'gold',l:'投資人年分潤',v:wan(m.annualIncome),s:'資金池淨利 × '+(100-state.compShare)+'%（投資人）'},
+    {cls:'coral',l:(m.companyShare<0?'公司補貼（'+m.effCompShare+'%）':'公司實得分潤（'+m.effCompShare+'%）'),v:wan(m.companyShare),s:state.negBonus>0?('基礎 '+state.compShare+'% − 投資人加碼 '+state.negBonus+'%'):'資金池淨利 × 公司分潤比例'},
+    {cls:'gold',l:'投資人年分潤',v:wan(m.annualIncome),s:'資金池淨利 × '+(100-m.effCompShare)+'%'+(state.negBonus>0?'（含協商加碼）':'（投資人）')},
     {cls:'grn',l:state.years+' 年總回收',v:wan(m.totalRecovery),s:'本金 '+fmt(state.total)+'萬 ＋ 投資人累積分潤'},
     {cls:'gold',l:'投資報酬率 ROI',v:pct(m.roi*100),s:'投資人累積分潤 ÷ 總投資額',pill:'五年'},
     {cls:'blu',l:'真實年化報酬 IRR',v:pct(m.irrVal*100),s:'投資人全額本金內部報酬率'},
@@ -547,7 +549,7 @@ function renderPlans(){
     document.getElementById(p[7]).textContent=pct(m.roi*100)+' / '+pct(m.irrVal*100);
     document.getElementById(p[8]).textContent=wan(m.netProfit);
     document.getElementById(p[9]).textContent=wan(m.companyShare);
-    document.getElementById(p[10]).textContent=state.compShare;
+    document.getElementById(p[10]).textContent=m.effCompShare;
   });
 }
 
@@ -562,7 +564,7 @@ function renderComment(m){
   else if(state.mode==='advanced'&&m.netRateDeployed<0){p2='<span class="warn">模型失效：</span>當前毛收益率 '+(m.grossRate*100).toFixed(1)+'% 不足以覆蓋壞帳 '+state.badDebtPct+'%＋營運 '+state.opexPct+'%，淨收益為負（'+ny.toFixed(1)+'%），此參數組合下方案無法成立。';}
   else if(state.mode==='advanced'&&!constrained){p2='<span class="warn">規模警示：</span>當前需求僅 '+wan(m.demand)+'，低於資金池 '+fmt(m.pool)+' 萬，<b>部署率僅 '+dep.toFixed(0)+'%</b>。閒置資金不生息，年收益被壓到 <b>'+fmt(Math.round(m.annualIncome))+' 萬</b>、IRR 僅 <span class="warn">'+irrV.toFixed(1)+'%</span>。要讓資金池滿載，移工人數需達約 <b>'+fmt(Math.round(m.breakevenWorkers))+' 人</b>（其餘條件不變）——這正是「規模即報酬」的關鍵。';}
   else{p2='資金池滿載部署（部署率 '+dep.toFixed(0)+'%）。資金池年淨利 <b>'+fmt(Math.round(m.netProfit))+' 萬</b>（淨利率 '+ny.toFixed(1)+'%）。<span class="warn">規模洞察：</span>'+fmt(state.workers)+' 名移工帶來 <b>'+wanBig(m.demand)+'</b> 放款需求，遠超資金池 '+fmt(m.pool)+' 萬，未滿足缺口 <span class="hl">'+wanBig(Math.max(0,m.demand-m.deployed))+'</span>——投資報酬已由資金池收益率鎖定（與人數無關）；人數規模反映的是後續擴張可吸納的放款空間與追加募資潛力。';}
-  let p3='<span class="warn">分潤結構：</span>資金池年淨利 <b>'+fmt(Math.round(m.netProfit))+' 萬</b>，其中公司分潤 <b>'+state.compShare+'%</b>（'+fmt(Math.round(m.companyShare))+' 萬，流向平台營運與股東），投資人分得 <b>'+(100-state.compShare)+'%</b>（'+fmt(Math.round(m.annualIncome))+' 萬）。投資人實際淨報酬率 <span class="hl">'+(m.investorYieldOnPool*100).toFixed(2)+'%</span>，五年 ROI <b>'+roi.toFixed(1)+'%</b>、真實年化 IRR <span class="hl">'+irrV.toFixed(1)+'%</span>（全額本金計）。';
+  let p3='<span class="warn">分潤結構：</span>資金池年淨利 <b>'+fmt(Math.round(m.netProfit))+' 萬</b>，公司基礎分潤 <b>'+state.compShare+'%</b>'+(state.negBonus>0?('、投資人協商加碼 <b>'+state.negBonus+'%</b>，公司實得 <b>'+m.effCompShare+'%</b>'):'')+'（'+fmt(Math.round(m.companyShare))+' 萬'+(m.companyShare<0?'，<span class="warn">公司補貼投資人</span>':'，流向平台營運與股東')+'），投資人分得 <b>'+(100-m.effCompShare)+'%</b>（'+fmt(Math.round(m.annualIncome))+' 萬）。投資人實際淨報酬率 <span class="hl">'+(m.investorYieldOnPool*100).toFixed(2)+'%</span>，五年 ROI <b>'+roi.toFixed(1)+'%</b>、IRR <span class="hl">'+irrV.toFixed(1)+'%</span>。';
   let p4='<span class="warn">敏感度：</span>壞帳率每升 <b>1 個百分點</b>，年收益約減 <b>'+fmt(Math.round(bdSens))+' 萬</b>。'+(ny>=15?'激進情境壞帳緩衝較薄，建議要求風險準備金、超額擔保或分潤回撥對沖下行。':(ny<11?'收益偏低，宜檢視手續費定價、周轉與部署率是否仍有提升空間。':'風險報酬尚屬均衡，建議於合約鎖定最低保證收益並明列本金返還來源。'));
   document.getElementById('commentBody').innerHTML='<p>'+p1+'</p><p>'+p2+'</p><p>'+p3+'</p><p>'+p4+'</p>';
 }
@@ -572,7 +574,7 @@ function renderChain(m){
     {ic:'01',t:'移工人數',v:fmt(state.workers)+' 人'},
     {ic:'02',t:'放款資金需求',v:wanBig(m.demand)},
     {ic:'03',t:'資金池淨利',v:wan(m.netProfit)},
-    {ic:'04',t:'公司分潤 '+state.compShare+'%',v:wan(m.companyShare)},
+    {ic:'04',t:(m.companyShare<0?'公司補貼 ':'公司分潤 ')+m.effCompShare+'%',v:wan(m.companyShare)},
     {ic:'05',t:'投資人分潤',v:wan(m.annualIncome)},
     {ic:'06',t:'投資報酬率',v:pct(m.roi*100),out:true}
   ];
@@ -589,7 +591,7 @@ function render(){
     el.textContent=(f.step<1)?v.toFixed(f.step<0.5?2:1):fmt(v);
     const inp=document.getElementById('r_'+k);if(inp&&k!==dragging){const sv=toSlider(k,v);if(Math.abs(parseFloat(inp.value)-sv)>0.5)inp.value=sv;}
     const d=document.getElementById('d_'+k);
-    if(d){let txt='';if(k==='tenorM')txt='→ 周轉 '+(12/v).toFixed(1)+' 次/年';else if(k==='feePct'&&state.mode==='advanced')txt='→ 毛收益率 '+(12/state.tenorM*v).toFixed(1)+'%';else if(k==='workers'){txt='→ 放款需求 '+wanBig(m.demand)+(m.demand>=m.pool?'（滿載）':'');}else if(k==='compShare'){txt='→ 投資人分得 '+(100-v)+'%';}d.textContent=txt;}
+    if(d){let txt='';if(k==='tenorM')txt='→ 周轉 '+(12/v).toFixed(1)+' 次/年';else if(k==='feePct'&&state.mode==='advanced')txt='→ 毛收益率 '+(12/state.tenorM*v).toFixed(1)+'%';else if(k==='workers'){txt='→ 放款需求 '+wanBig(m.demand)+(m.demand>=m.pool?'（滿載）':'');}else if(k==='compShare'){txt='→ 公司實得 '+(v-state.negBonus)+'%、投資人 '+(100-v+state.negBonus)+'%';}else if(k==='negBonus'){txt='→ 投資人實得 '+(100-state.compShare+v)+'%（公司實得 '+(state.compShare-v)+'%）';}d.textContent=txt;}
   }));
   document.querySelectorAll('.sctab').forEach(b=>{const on=b.dataset.sc===state.scenario;b.classList.toggle('on',on);b.setAttribute('aria-selected',on?'true':'false');});
   const sp=document.getElementById('statePill');
